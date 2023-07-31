@@ -22,7 +22,6 @@ Transform the positions of IFC space boundaries to match the requirements of ene
 ```
 
 ## Contact
-<img src="add/e3d.jpg" height="30">   
 
 Veronika Richter
 richter@e3d.rwth-aachen.de  
