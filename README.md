@@ -21,6 +21,12 @@ Transform the positions of IFC space boundaries to match the requirements of ene
 }
 ```
 
+## Resources
+The algorithm was tested on the IFC4 file (AC20-FZK-Haus_with_SB.ifc). This 
+IFC4 file was created by Institute for Automation and Applied Informatics (IAI)
+/ Karlsruhe Institute of Technology (KIT) and modified using the 
+[IFC2SB](https://github.com/RWTH-E3D/IFC2SB) tool. 
+
 ## Contact
 
 Veronika Richter
