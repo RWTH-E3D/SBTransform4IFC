@@ -1032,7 +1032,13 @@ if __name__ == "__main__":
                 temp = create_edges(sb.points, [])
                 sb.edges = temp
                 temp2 = make_wire(temp)
-                temp3 = make_face(temp2)
+                try:
+                    temp3 = make_face(temp2)
+                except AssertionError:
+                    print(f"Assertion Error, Failed to produce face from "
+                          f"points {sb.points}. This surface is skippend. "
+                          f"This may result in a gap in the resulting model.")
+                    continue
                 sb.newBOUND = temp3
                 sb.normal_vector = normal_vector_from_plane(sb.plane)
             else:
