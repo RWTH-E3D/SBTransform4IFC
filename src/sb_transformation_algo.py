@@ -436,7 +436,7 @@ if __name__ == "__main__":
     """ Enter ifc file here!!"""
     # Set your path to your IFC here. 
     # Tested on FZK-Haus: https://www.ifcwiki.org/index.php?title=KIT_IFC_Examples
-    ifc_file = ifcopenshell.open("AC20-FZK-Haus.ifc")
+    ifc_file = ifcopenshell.open("..\Resources\AC20-FZK-Haus_with_SB.ifc")
 
     """ Enter applied Standard "VDI6020_strict","VDI6020_center_all_not_adiabatic",
         "VDI2078", "ASHRAE140", "DIN12831", "DINV18599" """
