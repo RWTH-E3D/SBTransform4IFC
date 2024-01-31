@@ -7,13 +7,15 @@
     Student: Alex Junck
     Consultant: Veronika Richter, M.Sc. RWTH Aachen
 """
-
+import os
 from builtins import print, len
 from typing import List
 import numpy as np
 
 import ifcopenshell
 import ifcopenshell.geom
+from ifcopenshell_tools import *
+
 from OCCUtils.Construct import face_normal, make_offset_shape, scale_uniformal,\
     make_face, make_wire, compound
 from OCCUtils.Common import normal_vector_from_plane, minimum_distance, midpoint, \
@@ -22,8 +24,11 @@ from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_Transform, BRepBuilderAPI_Mak
 from OCC.Core.BRep import BRep_Tool
 from OCC.Core.TopoDS import TopoDS_Shape, TopoDS_Iterator, topods_Vertex
 from OCC.Core.TopAbs import TopAbs_VERTEX
-from OCC.Core.gp import gp_Mat, gp_Vec, gp_Trsf, gp_Quaternion, gp_Pln, gp_Pnt
+from OCC.Core.gp import gp_Mat, gp_Vec, gp_Trsf, gp_Quaternion, gp_Pln, gp_Pnt, \
+    gp_Dir
 from OCC.Display.SimpleGui import init_display
+
+from src.pyocc_tools import PyOCCTools
 
 settings = ifcopenshell.geom.settings()
 settings.set(settings.USE_PYTHON_OPENCASCADE, True)
@@ -231,6 +236,86 @@ def position_from_standard(boundary, standard):
         return 0
 
 
+def export_ifc(ifc_file_name, ifc_path, final_sb_list, Norm_Standard):
+    """Export shape of corrected ais_shapes to ifc.
+
+    Includes back transformation to local coordinate system of space
+    boundary.
+    """
+    #todo: fix non-unique guids
+    #todo: apply shape healing? some shapes are not displayed in viewer,
+    # maybe due to non-planarity or not exported?
+    org_name = ifc_file_name
+    corrected_file = ifcopenshell.open(ifc_path + "/" + org_name)
+
+    for bound in final_sb_list:
+        guid = bound.guid  # todo: bug! guids are not unique for SBs
+        s = bound.NEWBOUND
+        if abs(PyOCCTools.get_shape_area(s)) < 1e-5:
+            flag = False
+            for entity in corrected_file.by_type("IfcRoot"):
+                if entity.GlobalId == guid:
+                    flag = True
+            if flag is False:
+                continue
+            try:
+                obj = corrected_file.by_guid(guid)
+                corrected_file.remove(obj)
+            except:
+                print(f"did not modify bound {guid} due to surface area smaller "
+                      f"1e-3, did not remove it due to segfault")
+                obj = corrected_file.by_guid(guid)
+                obj.ConnectionGeometry = ()
+            continue
+        relating_space = bound.ifc.RelatingSpace
+        lp = PyOCCTools.local_placement(relating_space.ObjectPlacement).tolist()
+        mat = gp_Mat(lp[0][0], lp[0][1], lp[0][2], lp[1][0],
+                     lp[1][1], lp[1][2], lp[2][0], lp[2][1],
+                     lp[2][2])
+        vec = gp_Vec(lp[0][3], lp[1][3], lp[2][3])
+        trsf = gp_Trsf()
+        trsf.SetTranslation(vec*-1)
+        s = BRepBuilderAPI_Transform(s, trsf).Shape()
+        trsf2 = gp_Trsf()
+        trsf2.SetRotation(gp_Quaternion(mat).Inverted())
+        s = BRepBuilderAPI_Transform(s, trsf2).Shape()
+        pnts = PyOCCTools.get_points_of_face(s)
+        try:
+            plane_origin = pnts[0]
+        except:
+            print("plane origin does not have points.")
+        plane_next = pnts[1]
+        plane_normal = gp_Dir(PyOCCTools.simple_face_normal(s))
+        u_plane = gp_Dir(gp_Vec(plane_origin, plane_next))
+        v_plane = plane_normal.Crossed(u_plane)
+        axis2placement3D = create_ifcaxis2placement(corrected_file,
+                                                    plane_origin.Coord(),
+                                                    plane_normal.Coord(),
+                                                    u_plane.Coord())
+        plane = corrected_file.createIfcPlane(axis2placement3D)
+
+        ifc_poly_pnts = []
+        for p in pnts:
+            u, v = calc_point_uv_parameters_on_plane(p,
+                                                     plane_origin,
+                                                     u_plane,
+                                                     v_plane)
+            np = corrected_file.createIfcCartesianPoint((u, v, 0.0))
+            ifc_poly_pnts.append(np)
+
+        polyline = corrected_file.createIfcPolyline(ifc_poly_pnts)
+        curveBoundedPlane = corrected_file.createIfcCurveBoundedPlane(plane, polyline, ())
+        corrected_file.by_id(guid).ConnectionGeometry = \
+            corrected_file.createIfcConnectionSurfaceGeometry(
+            curveBoundedPlane)
+    result_path = "../Results"
+    if not os.path.exists(result_path):
+        os.makedirs(result_path)
+    corrected_file.write(result_path + "/"
+                         + org_name.replace('.ifc', '')
+                         + f'_corrected_{Norm_Standard}.ifc')
+
+
 class SpaceClass:
     """
     Holds all SB-Instances of a space that relevant. Moreover it contains its IFC-Data.
@@ -256,6 +341,7 @@ class SpaceBoundaryClass:
         self.adiabatic = 0
         self.heated_on_the_other_side = 0
         self.ifc = ifc_bound
+        self.guid = self.ifc.GlobalId
         self.bound_shape = self.get_bound_shape(ifc_bound)
         self.init_points = self.get_ordered_points(self.bound_shape, [])
         self.type = self.ifc.Description
@@ -436,11 +522,13 @@ if __name__ == "__main__":
     """ Enter ifc file here!!"""
     # Set your path to your IFC here. 
     # Tested on FZK-Haus: https://www.ifcwiki.org/index.php?title=KIT_IFC_Examples
-    ifc_file = ifcopenshell.open("..\Resources\AC20-FZK-Haus_with_SB.ifc")
+    ifc_file_name = "AC20-FZK-Haus_with_SB.ifc"
+    ifc_path = r"..\Resources"
+    ifc_file = ifcopenshell.open(ifc_path + "/" + ifc_file_name)
 
     """ Enter applied Standard "VDI6020_strict","VDI6020_center_all_not_adiabatic",
         "VDI2078", "ASHRAE140", "DIN12831", "DINV18599" """
-    Norm_Standard = "DIN12831"
+    Norm_Standard = "VDI2078"
 
     # list with all considered SB-Instances (only Ifc-Data)
     ifc_bounds = ifc_file.by_type("IfcRelSpaceBoundary2ndLevel")
@@ -1076,4 +1164,6 @@ if __name__ == "__main__":
 
     print("Generating graphical representation of " + str(len(final_list_with_SB))
           + " SBs.")
+
+    export_ifc(ifc_file_name, ifc_path, final_list_with_SB, Norm_Standard)
     SBViewer(final_list_with_SB)
